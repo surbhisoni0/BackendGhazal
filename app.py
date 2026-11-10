@@ -6,7 +6,6 @@ from datetime import date
 from flask import Flask, jsonify, make_response, request, send_from_directory
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-PUBLIC = os.path.abspath(os.path.join(BASE, "..", "frontend"))  # website files live in ../frontend
 
 
 def load_env():
@@ -22,91 +21,46 @@ def load_env():
 
 
 load_env()
-WA = re.sub(r"\D", "", os.environ.get("WHATSAPP_NUMBER", ""))
+WA = re.sub(r"\D", "", os.environ.get("WHATSAPP_NUMBER", "244943634616"))
 KEY = os.environ.get("GROQ_API_KEY", "")
 API = os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions")
 MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")  # see console.groq.com/docs/models
-SITE = os.environ.get("SITE_URL", "").rstrip("/")
+SITE = os.environ.get("SITE_URL", "https://dineatghazal.vercel.app").rstrip("/")
+ALLOWED_ORIGINS = {SITE, "https://dineatghazal.vercel.app"}
 PORT = int(os.environ.get("PORT", "3000"))
 TRUST_PROXY = os.environ.get("TRUST_PROXY", "") == "1"  # set to 1 only behind one trusted reverse proxy
 
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
 
-# ---------- pages ----------
+# ---------- basic routes (frontend is hosted separately on Vercel) ----------
 def read(rel):
-    with open(os.path.join(PUBLIC, rel), encoding="utf-8") as f:
+    with open(os.path.join(BASE, rel), encoding="utf-8") as f:
         return f.read()
 
 
-def seo(path):
-    if not SITE:
-        return ""
-    return (f'<link rel="canonical" href="{SITE}{path}">'
-            f'<link rel="alternate" hreflang="pt" href="{SITE}{path}">'
-            f'<link rel="alternate" hreflang="en" href="{SITE}{path}?lang=en">'
-            f'<meta property="og:url" content="{SITE}{path}">')
-
-
-CFG = f'data-wa="{WA}" data-chat="{1 if KEY else 0}"'
-PAGES = {p: read(f).replace("%%SEO%%", seo(p)).replace("%%CFG%%", CFG)
-         for p, f in (("/", "index.html"), ("/gallery", "gallery.html"))}
-
-
-def html(page):
-    r = make_response(PAGES[page])
-    r.headers["Content-Type"] = "text/html; charset=utf-8"
-    r.headers["Cache-Control"] = "no-cache"
-    return r
-
-
 @app.get("/")
-@app.get("/index.html")
-def home():
-    return html("/")
-
-
-@app.get("/gallery")
-@app.get("/gallery.html")
-def gallery():
-    return html("/gallery")
-
-
-@app.get("/robots.txt")
-def robots():
-    body = "User-agent: *\nAllow: /\n" + (f"Sitemap: {SITE}/sitemap.xml\n" if SITE else "")
-    return body, 200, {"Content-Type": "text/plain; charset=utf-8"}
-
-
-@app.get("/sitemap.xml")
-def sitemap():
-    if not SITE:
-        return "", 404
-    urls = "".join(
-        f'<url><loc>{SITE}{p}</loc><xhtml:link rel="alternate" hreflang="pt" href="{SITE}{p}"/>'
-        f'<xhtml:link rel="alternate" hreflang="en" href="{SITE}{p}?lang=en"/></url>' for p in ("/", "/gallery"))
-    xml = ('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
-           f'xmlns:xhtml="http://www.w3.org/1999/xhtml">{urls}</urlset>')
-    return xml, 200, {"Content-Type": "application/xml; charset=utf-8"}
-
-
-@app.get("/<path:filename>")
-def static_files(filename):
-    return send_from_directory(PUBLIC, filename, max_age=86400)
+@app.get("/health")
+def health():
+    return jsonify(ok=True, service="ghazal-backend")
 
 
 @app.after_request
-def security_headers(r):
-    r.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; "
-        "frame-ancestors 'none'; form-action 'self'; base-uri 'self'")
-    r.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+def cors_and_security(r):
+    o = request.headers.get("Origin")
+    if o and o in ALLOWED_ORIGINS:
+        r.headers["Access-Control-Allow-Origin"] = o
+        r.headers["Access-Control-Allow-Methods"] = "POST, GET, OPTIONS"
+        r.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        r.headers["Vary"] = "Origin"
     r.headers["X-Content-Type-Options"] = "nosniff"
-    r.headers["X-Frame-Options"] = "DENY"
     r.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    r.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     return r
+
+
+@app.route("/api/<path:_p>", methods=["OPTIONS"])
+def preflight(_p):
+    return "", 204
 
 
 # ---------- helpers ----------
@@ -142,7 +96,7 @@ def clean(s, n):
 
 def bad_origin():
     o = request.headers.get("Origin")
-    return bool(o and SITE and o != SITE)
+    return bool(o and o not in ALLOWED_ORIGINS)
 
 
 def json_body():
@@ -224,7 +178,7 @@ def subscribe():
 # ---------- AI chat ----------
 def menu_text():
     try:
-        m = re.search(r"const M=(\{.*\});", read("js/menu-data.js"))
+        m = re.search(r"const M=(\{.*\});", read("menu-data.js"))
         return "\n".join(f"{c}: " + "; ".join(f"{n}{' (' + desc + ')' if desc else ''} {p}" for n, desc, p in items)
                          for c, items in json.loads(m.group(1)).items())
     except Exception:
@@ -279,7 +233,7 @@ def chat():
 
 @app.errorhandler(404)
 def nf(_):
-    return "Not found", 404
+    return jsonify(ok=False, error="not_found"), 404
 
 
 @app.errorhandler(413)
@@ -293,8 +247,8 @@ def err(_):
 
 
 if __name__ == "__main__":
-    host = os.environ.get("HOST", "dineatghazal.vercel.app")
-    print(f"GHAZAL running on http://{host}:{PORT}  (WhatsApp: {'on' if WA else 'off'}, chat: {'on' if KEY else 'off'})")
+    host = os.environ.get("HOST", "0.0.0.0")  # must be 0.0.0.0 on Render, never a domain name
+    print(f"GHAZAL API running on {host}:{PORT}  (WhatsApp: {'on' if WA else 'off'}, chat: {'on' if KEY else 'off'})")
     try:
         from waitress import serve
         serve(app, host=host, port=PORT)
