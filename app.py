@@ -293,7 +293,7 @@ def err(_):
 
 
 if __name__ == "__main__":
-    host = os.environ.get("HOST", "127.0.0.1")
+    host = os.environ.get("HOST", "dineatghazal.vercel.app")
     print(f"GHAZAL running on http://{host}:{PORT}  (WhatsApp: {'on' if WA else 'off'}, chat: {'on' if KEY else 'off'})")
     try:
         from waitress import serve
