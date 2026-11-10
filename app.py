@@ -247,7 +247,7 @@ def err(_):
 
 
 if __name__ == "__main__":
-    host = os.environ.get("HOST", "0.0.0.0")  # must be 0.0.0.0 on Render, never a domain name
+    host = "0.0.0.0"  # always bind all interfaces; the HOST env var is ignored (a domain name here crashes Render)
     print(f"GHAZAL API running on {host}:{PORT}  (WhatsApp: {'on' if WA else 'off'}, chat: {'on' if KEY else 'off'})")
     try:
         from waitress import serve
